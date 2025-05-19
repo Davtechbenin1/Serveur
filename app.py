@@ -79,6 +79,10 @@ async def put_details(fichier : str, data: dict):
 	Save(fichier,data)
 	return {"Méssage":"Donnée ajouter"}
 
+@app.get("/")
+def read_root():
+	return {"message": "Serveur opérationnel"}
+
 
 @app.get('/version')
 async def get_version():
