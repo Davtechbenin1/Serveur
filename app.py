@@ -90,4 +90,4 @@ async def get_version():
 
 @app.get('/update')
 async def download_update():
-	return FileResponse('./updates/v1.0.1.zip',filename = "update.zip")
+	return FileResponse('./updates/v1.0.2.zip',filename = "update.zip")
