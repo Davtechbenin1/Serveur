@@ -15,7 +15,7 @@ except ImportError:
 import json
 
 app = FastAPI()
-CURENT_VERSION = "1.0.1"
+CURENT_VERSION = "1.0.2"
 UPLOAD_DIR = pathlib.Path('images')
 UPLOAD_DIR.mkdir(exist_ok = True)
 
