@@ -14,7 +14,9 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL=postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway
+
+#os.getenv("DATABASE_URL")
 
 def Arrondit_a(fonc):
 	def wrapper(self,*args,**kwarg):
@@ -427,3 +429,4 @@ class Data_handler:
 		self.Data_Table.setdefault(base_name, {})[table] = all_rows
 
 		return True
+
