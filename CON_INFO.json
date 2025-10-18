@@ -1,0 +1,8 @@
+{
+    "host": "localhost",
+    "port": 8010,
+    "user": "postgres",
+    "pass_word": "davtechbenin",
+    "postgres_host": "localhost",
+    "postgres_port": "8000"
+}
