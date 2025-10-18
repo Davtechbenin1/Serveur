@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-DATABASE_URL=postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway
+DATABASE_URL= "postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway"
 
 #os.getenv("DATABASE_URL")
 
@@ -429,4 +429,5 @@ class Data_handler:
 		self.Data_Table.setdefault(base_name, {})[table] = all_rows
 
 		return True
+
 
