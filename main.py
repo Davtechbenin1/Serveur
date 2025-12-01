@@ -52,6 +52,19 @@ async def get_data(basename,table,request:Request):
 
 	return data
 
+
+@app.put("/api/select/{basename}")
+async def get_multiple_table(basename,request:Request):
+	data = await request.json()
+	keys = data.get('keys') or None
+	table_liste = data.get('table liste')
+	ret = Con_obj.Multiple_get(basename,table_liste)
+	data['data'] = ret
+
+	info = f"select <<{ret}>> from table:{basename}_{table_liste}"
+	Con_obj.log(info)
+	return data
+
 # Méthode de sauvegarde de donnée
 @app.put("/api/insert/{basename}/{table}")
 async def save_data(basename,table,request:Request):
@@ -180,3 +193,4 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
