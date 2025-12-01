@@ -37,7 +37,7 @@ app = FastAPI()
 # Version actuelle de ZoeMarket
 CURRENT_VERSION = "1.0.0"
 GITHUB_APK_URL = ""
-@app.get("/current_version")
+@app.get("/api/current_version")
 def get_update_info():
     """
     Retourne les infos de mise à jour pour ZoeMarket.
@@ -212,5 +212,6 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
 
 
