@@ -349,6 +349,12 @@ class Data_handler:
 			return rows.get(ident, {})
 		return rows
 
+	def Multiple_get(self,base_name,tables_liste):
+		all_dic = dict()
+		for table in tables_liste:
+			all_dic[table] = self.Get_data(base_name,table)
+		return all_dic
+
 	def Save_data(self, base_name, table, data, data_ident):
 		"""
 		Sauvegarde ou met à jour une entrée dans la table.
@@ -429,5 +435,6 @@ class Data_handler:
 		self.Data_Table.setdefault(base_name, {})[table] = all_rows
 
 		return True
+
 
 
