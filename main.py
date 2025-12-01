@@ -29,6 +29,25 @@ app.add_middleware(GZipMiddleware, minimum_size = 500)
 # instance globale
 ws_manager = ConnectionManager()
 
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+
+app = FastAPI()
+
+# Version actuelle de ZoeMarket
+CURRENT_VERSION = "1.0.0"
+GITHUB_APK_URL = ""
+@app.get("/current_version")
+def get_update_info():
+    """
+    Retourne les infos de mise à jour pour ZoeMarket.
+    """
+    return {
+        "version": CURRENT_VERSION,
+        "apk_url": GITHUB_APK_URL,
+        "changelog": "Première version publique de ZoeMarket."
+    }
+	
 @app.get("/api/open_table/{table_name}")
 def Update_my_tabs(table_name):
 	return Con_obj.Create(table_name)
@@ -193,4 +212,5 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
 
