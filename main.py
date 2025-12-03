@@ -35,8 +35,8 @@ from fastapi.responses import FileResponse
 app = FastAPI()
 
 # Version actuelle de ZoeMarket
-CURRENT_VERSION = "1.0.0"
-GITHUB_APK_URL = ""
+CURRENT_VERSION = "1.0.1"
+GITHUB_APK_URL = "https://github.com/Davtechbenin1/Progest/releases/download/V1.0.0/zoeshop.apk"
 @app.get("/api/current_version")
 def get_update_info():
     """
@@ -212,6 +212,7 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
 
 
 
