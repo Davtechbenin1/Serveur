@@ -63,10 +63,6 @@ async def get_data(basename,table,request:Request):
 	keys = data.get('keys') or None
 	ret = await Con_obj.Get_data(basename,table,keys)
 	data['data'] = ret
-
-	info = f"select <<{ret}>> from table:{basename}_{table} key: {keys}"
-	Con_obj.log(info)
-
 	return data
 
 
@@ -77,9 +73,6 @@ async def get_multiple_table(basename,request:Request):
 	table_liste = data.get('table liste')
 	ret = await Con_obj.Multiple_get(basename,table_liste)
 	data['data'] = ret
-
-	info = f"select <<{ret}>> from table:{basename}_{table_liste}"
-	Con_obj.log(info)
 	return data
 
 # Méthode de sauvegarde de donnée
@@ -99,9 +92,6 @@ async def save_data(basename,table,request:Request):
 			"data": th_data,
 		})
 	)
-	
-	info = f"insert <<{th_data}>> to table:{basename}_{table} key: {keys}"
-	Con_obj.log(info)
 	return data
 
 # Méthode de Suppression de donnée
@@ -121,10 +111,6 @@ async def delete_data(basename,table,request:Request):
 			"data": ret,
 		})
 	)
-	
-	info = f"delete <<{ret}>> from table:{basename}_{table} key: {keys}"
-	Con_obj.log(info)
-	
 	data['data'] = ret
 	return data
 
@@ -132,7 +118,7 @@ async def delete_data(basename,table,request:Request):
 @app.post("/api/upload/{localisation}")
 async def upload_file(localisation:str,file: UploadFile = File(...)):
 	ext = os.path.splitext(file.filename)[1][1:]
-	file_name = await Con_obj.File_name(localisation,ext)
+	file_name = Con_obj.File_name(localisation,ext)
 	Con_obj.Save_binarie(file_name,file)
 	return {"filename":file_name}
 
@@ -210,6 +196,7 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
 
 
 
