@@ -29,10 +29,8 @@ app.add_middleware(GZipMiddleware, minimum_size = 500)
 # instance globale
 ws_manager = ConnectionManager()
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
 
-app = FastAPI()
+from fastapi.responses import FileResponse
 
 # Version actuelle de ZoeMarket
 CURRENT_VERSION = "1.0.1"
@@ -63,7 +61,7 @@ def Backup(basename):
 async def get_data(basename,table,request:Request):
 	data = await request.json()
 	keys = data.get('keys') or None
-	ret = Con_obj.Get_data(basename,table,keys)
+	ret = await Con_obj.Get_data(basename,table,keys)
 	data['data'] = ret
 
 	info = f"select <<{ret}>> from table:{basename}_{table} key: {keys}"
@@ -77,7 +75,7 @@ async def get_multiple_table(basename,request:Request):
 	data = await request.json()
 	keys = data.get('keys') or None
 	table_liste = data.get('table liste')
-	ret = Con_obj.Multiple_get(basename,table_liste)
+	ret = await Con_obj.Multiple_get(basename,table_liste)
 	data['data'] = ret
 
 	info = f"select <<{ret}>> from table:{basename}_{table_liste}"
@@ -90,7 +88,7 @@ async def save_data(basename,table,request:Request):
 	data = await request.json()
 	keys = data.get('keys') or None
 	th_data = data.get('data')
-	ret = Con_obj.Save_data(basename,table,th_data,keys)
+	ret = await Con_obj.Save_data(basename,table,th_data,keys)
 	asyncio.create_task(
 		ws_manager.broadcast_table_update(basename, {
 			"action":"update",
@@ -111,7 +109,7 @@ async def save_data(basename,table,request:Request):
 async def delete_data(basename,table,request:Request):
 	data = await request.json()
 	keys = data.get('keys') or None
-	ret = Con_obj.Delete_data(basename,table)
+	ret = await Con_obj.Delete_data(basename,table)
 
 	asyncio.create_task(
 		ws_manager.broadcast_table_update(basename, {
@@ -134,7 +132,7 @@ async def delete_data(basename,table,request:Request):
 @app.post("/api/upload/{localisation}")
 async def upload_file(localisation:str,file: UploadFile = File(...)):
 	ext = os.path.splitext(file.filename)[1][1:]
-	file_name = Con_obj.File_name(localisation,ext)
+	file_name = await Con_obj.File_name(localisation,ext)
 	Con_obj.Save_binarie(file_name,file)
 	return {"filename":file_name}
 
@@ -212,6 +210,7 @@ if __name__ == "__main__":
 		log_level = "info")
 	#"""
 #'''
+
 
 
 
