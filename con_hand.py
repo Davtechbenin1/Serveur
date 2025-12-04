@@ -330,7 +330,7 @@ class Data_handler:
 			query = sql.SQL("""
 				INSERT INTO {table} (id, data)
 				VALUES (%s, %s::jsonb)
-				ON CONFLIT (id) DO UPDATE
+				ON CONFLICT (id) DO UPDATE
 				SET data = EXCLUDED.data, updated_at = NOW()
 				""").format(table=sql.Identifier(table))
 			cur.execute(query,[data_ident, json.dumps(data)])
@@ -385,5 +385,6 @@ class Data_handler:
 
 		# mise à jour cache
 		
+
 
 
