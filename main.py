@@ -99,7 +99,7 @@ async def save_data(basename,table,request:Request):
 async def delete_data(basename,table,request:Request):
 	data = await request.json()
 	keys = data.get('keys') or None
-	ret = await Con_obj.Delete_data(basename,table)
+	ret = await Con_obj.Delete_data(basename,table,keys)
 
 	asyncio.create_task(
 		ws_manager.broadcast_table_update(basename, {
@@ -172,33 +172,3 @@ logging.basicConfig(
 	format = "%(levelname)s: %(message)s",
 	level = logging.INFO
 )
-'''
-if __name__ == "__main__":
-	inf_dic = Con_obj.Get_fichier('CON_INFO')
-	#"""
-	if inf_dic:
-		host = inf_dic.get('host')
-		port = inf_dic.get("port")
-	else:
-		host = "localhost"
-		port = 8010
-		inf_dic = {"host":host,'port':port,"user":"postgres",
-			"pass_word":'davtechbenin',"postgres_host":"localhost",
-			"postgres_port":"5432"}
-		Con_obj.Save_fichier("CON_INFO",inf_dic)
-
-	Con_obj.user = inf_dic.get('user').strip()
-	Con_obj.pass_word = inf_dic.get('pass_word').strip()
-	Con_obj.port = int(inf_dic.get('postgres_port'))
-	Con_obj.host = inf_dic.get('postgres_host').strip()
-	
-	uvicorn.run(app,port = port,host = host,reload = False,
-		log_level = "info")
-	#"""
-#'''
-
-
-
-
-
-
