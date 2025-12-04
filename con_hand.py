@@ -11,7 +11,8 @@ from pathlib import Path
 import psycopg2, sys
 from psycopg2 import OperationalError, sql
 from dotenv import load_dotenv
-import os
+import os,asyncio
+from psycopg2.pool import SimpleConnectionPool
 
 load_dotenv()
 DATABASE_URL= "postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway"
@@ -33,20 +34,26 @@ class Data_handler:
 		)
 		self.format_time = "%d-%m-%Y .%H:%M:%S.%f"
 		self.file_base_dir = '.'
-		self.info_dir = os.path.join(Path.home(),".ProGest")
-		os.makedirs(self.info_dir,exist_ok=True)
 
-		self.executor.submit(self.clean_old_log)
+		self.created_table = set()
+
 		self.Data_Table = {}
 		self.Connexion_table = {}
 		self.Arch_Data_Table = {}
 		self.Update_Table = {}
+		self.pool = SimpleConnectionPool(minconn=1, maxconn=3, dsn=DATABASE_URL)
 
-		self.port = "5432"
-		self.host = "localhost"
-		self.user = "postgres"
-		self.pass_word = "davtechbenin"
-		self.conn = psycopg2.connect(DATABASE_URL)
+		#self.conn = psycopg2.connect(DATABASE_URL)
+		#self.conn.autocommit = True
+
+	def get_conn(self):
+		return self.pool.getconn()
+
+	def put_conn(self,conn):
+		self.pool.putconn(conn)
+
+	def close_all(self):
+		self.pool.closeall()
 
 	def Create(self, base_name):
 		base_name = base_name.lower()
@@ -57,48 +64,9 @@ class Data_handler:
 			self.connect_to(base_name)
 
 	def connect_to(self, base_name):
-		"""
-		base_name = base_name.strip()
-		user = self.user.strip()
-		password = self.pass_word.strip()
-		host = self.host.strip()
-		port = int(self.port)
+		...
 
-		try:
-			self.Connexion_table[base_name] = psycopg2.connect(
-				dbname=base_name,
-				user=user,
-				password=password,
-				host=host,
-				port=port
-			)
-		except:
-			self._Create_base_(base_name)
-		#"""
-
-	def _Create_base_(self, base_name):
-		conn = psycopg2.connect(
-			dbname="postgres",
-			user=self.user,
-			password=self.pass_word,
-			host=self.host,
-			port=self.port
-		)
-		conn.autocommit = True
-		cur = conn.cursor()
-		cur.execute(sql.SQL("CREATE DATABASE {}"
-			).format(sql.Identifier(base_name)))
-		cur.close()
-		conn.close()
-
-		self.Connexion_table[base_name] = psycopg2.connect(
-			dbname=base_name,
-			user=self.user,
-			password=self.pass_word,
-			host=self.host,
-			port=self.port
-		)
-
+	
 	def Save_binarie(self, file_name, file):
 		content = file.file.read()
 		self.executor.submit(self._Save_bin_, file_name, content)
@@ -163,31 +131,14 @@ class Data_handler:
 	def get_ident(self, ident):
 		return ident
 
-	def insert_data(self, base_name, table, data):
-		table = self.get_th_table(base_name, table)
-		conn = self.Create_table(base_name, table)
-		cur = conn.cursor()
-		query = sql.SQL("""
-			INSERT INTO {table} (data, updated_at)
-			VALUES (%s, %s)
-			RETURNING id
-		""").format(table=sql.Identifier(table))
-
-		cur.execute(query, [json.dumps(data), datetime.datetime.now()])
-		new_id = cur.fetchone()[0]
-		conn.commit()
-		cur.close()
-		return new_id
-
 	def Create_table(self, base_name, table):
-		con = self.Connexion_table.get(base_name,self.conn)
-		if not con:
-			self.connect_to(base_name)
-			con = self.Connexion_table.get(base_name)
+		if table in self.created_table:
+			return self.get_conn()
+		con = self.get_conn()
 		cur = con.cursor()
 		query = sql.SQL("""
 			CREATE TABLE IF NOT EXISTS {table} (
-				id SERIAL PRIMARY KEY,
+				id TEXT PRIMARY KEY,
 				data JSONB NOT NULL,
 				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			)
@@ -195,6 +146,7 @@ class Data_handler:
 		cur.execute(query)
 		con.commit()
 		cur.close()
+		self.created_table.add(table)
 		return con
 
 	def clean_old_log(self):
@@ -220,11 +172,8 @@ class Data_handler:
 		d'une base de données PostgreSQL.
 		Chaque table est sauvegardée sous forme d'un fichier JSON.
 		"""
-		conn = self.Connexion_table.get(base_name,self.conn)
-		if not conn:
-			self.connect_to(base_name)
-			conn = self.Connexion_table.get(base_name)
-
+		conn = self.get_conn()
+		
 		# Nom du fichier ZIP
 		ZIP_p = os.path.join(getattr(self, "arch_base_dir", "."), f"{base_name}_backup.zip")
 
@@ -253,13 +202,13 @@ class Data_handler:
 				zipf.writestr(f"{table}.json", json_bytes)
 
 			cur.close()
+		self.put_conn(conn)
 
 		return ZIP_p
 
 	def Get_fichier(self, fichier):
 		if not fichier.endswith(".json"):
 			fichier += ".json"
-		#fichier = os.path.join(self.info_dir,fichier)
 		try:
 			with open(fichier, "r", encoding='utf-8') as f:
 				return json.load(f)
@@ -269,7 +218,6 @@ class Data_handler:
 	def Save_fichier(self, fichier, data):
 		if not fichier.endswith(".json"):
 			fichier += ".json"
-		#fichier = os.path.join(self.info_dir,fichier)
 		with self.lock:
 			with open(fichier, "w", encoding='utf-8') as f:
 				json.dump(data, f, indent=4)
@@ -294,14 +242,7 @@ class Data_handler:
 
 	def drop_all_tables(self, dbname, user, password, host="localhost", port=5432):
 		try:
-			conn = psycopg2.connect(
-				dbname=dbname,
-				user=user,
-				password=password,
-				host=host,
-				port=port
-			)
-			conn.autocommit = True
+			conn = self.get_conn()
 			cur = conn.cursor()
 
 			cur.execute("DROP SCHEMA public CASCADE;")
@@ -309,132 +250,140 @@ class Data_handler:
 
 			print("Toutes les tables ont été supprimées avec succès.")
 			cur.close()
-			conn.close()
+			self.put_conn(conn)
 
 		except Exception as e:
 			print("Erreur:", e)
 
 # Gestion des entrées et sorties
+	
+	async def Get_data(self,base_name,table, ident=None):
+		run_loop = asyncio.get_running_loop()
+		return await run_loop.run_in_executor(None,
+			self.__Get_data,base_name,
+			table, ident)
 
-	def Get_data(self, base_name, table, ident=None):
+	def __Get_data(self, base_name, table, ident=None):
 		all_table = self.Data_Table.get(base_name, {})
 		table = self.get_th_table(base_name, table)
-		table_cache = all_table.get(table, {})
 
-		if table_cache:
+		if table in all_table:
+			table_cache = all_table.get(table)
 			if ident:
 				return table_cache.get(ident, {})
-			else:
-				return table_cache
+			return table_cache
 
 		conn = self.Create_table(base_name, table)
-		cur = conn.cursor()
+		rows = dict()
+		try:
+			cur = conn.cursor()
 
-		query = sql.SQL("SELECT data FROM {} LIMIT 1"
-			).format(sql.Identifier(table))
-		cur.execute(query)
-		row = cur.fetchone()
+			query = sql.SQL("SELECT id, data FROM {}"
+				).format(sql.Identifier(table))
+			cur.execute(query)
+			rows = {row[0]: row[1] for row in cur.fetchall()}
 
-		if row:
-			rows = row[0]  # {id: dict()}
-		else:
-			rows = {}
+			
+			cur.close()
+			
 
-		cur.close()
+			# Mettre à jour le cache
+			self.Data_Table.setdefault(base_name, {})[table] = rows
+		
+		finally:
+			self.put_conn(conn)	
+			if ident:
+				return rows.get(ident, {})
+			return rows
 
-		# Mettre à jour le cache
-		self.Data_Table.setdefault(base_name, {})[table] = rows
 
-		if ident:
-			return rows.get(ident, {})
-		return rows
+	async def Multiple_get(self,base_name,tables_liste):
+		run_loop = asyncio.get_running_loop()
+		return await run_loop.run_in_executor(None,
+			self.__Multiple_get,
+			base_name,tables_liste)
 
-	def Multiple_get(self,base_name,tables_liste):
+	def __Multiple_get(self,base_name,tables_liste):
 		all_dic = dict()
 		for table in tables_liste:
-			all_dic[table] = self.Get_data(base_name,table)
+			all_dic[table] = self.__Get_data(base_name,table)
 		return all_dic
 
-	def Save_data(self, base_name, table, data, data_ident):
+	async def Save_data(self,base_name,table,data,data_ident):
+		run_loop = asyncio.get_running_loop()
+		return await run_loop.run_in_executor(None,
+			self.__Save_data,
+			base_name,table,data,data_ident)
+
+	def __Save_data(self, base_name, table, data, data_ident):
 		"""
 		Sauvegarde ou met à jour une entrée dans la table.
 		data_ident : identifiant de l'entrée (optionnel si 'id' présent dans data)
 		"""
+
 		table = self.get_th_table(base_name, table)
 		conn = self.Create_table(base_name, table)
-		cur = conn.cursor()
+		try:
+			cur = conn.cursor()
 
-		# Récupérer la ligne existante
-		query = sql.SQL("SELECT data FROM {} LIMIT 1").format(sql.Identifier(table))
-		cur.execute(query)
-		row = cur.fetchone()
-		if row:
-			all_rows = row[0]  # {id: dict}
-		else:
-			all_rows = {}
-
-		# Mettre à jour ou ajouter l'entrée
-		all_rows[data_ident] = data
-
-		# Mettre à jour la table
-		if row:
-			update_query = sql.SQL("UPDATE {table} SET data = %s::jsonb, updated_at = %s").format(
-				table=sql.Identifier(table)
-			)
-			cur.execute(update_query, [json.dumps(all_rows), datetime.datetime.now()])
-		else:
-			insert_query = sql.SQL("INSERT INTO {table} (data, updated_at) VALUES (%s, %s)").format(
-				table=sql.Identifier(table)
-			)
-			cur.execute(insert_query, [json.dumps(all_rows), datetime.datetime.now()])
-
-		conn.commit()
-		cur.close()
-
-		# Mettre à jour le cache
-		self.Data_Table.setdefault(base_name, {})[table] = all_rows
+			# Récupérer la ligne existante
+			query = sql.SQL("""
+				INSERT INTO {table} (id, data)
+				VALUES (%s, %s::jsonb)
+				ON CONFLIT (id) DO UPDATE
+				SET data = EXCLUDED.data, updated_at = NOW()
+				""").format(table=sql.Identifier(table))
+			cur.execute(query,[data_ident, json.dumps(data)])
+			conn.commit()
+			cur.close()
+			self.Data_Table.setdefault(base_name, {}).setdefault(table, {})[data_ident] = data
+		finally:
+			self.put_conn(conn)
 
 		return data
 
-	def Delete_data(self, base_name, table, ident):
+	async def Delete_data(self,base_name,table,ident):
+		run_loop = asyncio.get_running_loop()
+		return await run_loop.run_in_executor(None,self.__Delete_data,
+			base_name,table,ident)
+
+	def __Delete_data(self, base_name, table, ident):
 		"""
 		Supprime une ou plusieurs entrées dans la table.
 		ident : int, str ou liste
 		"""
 		table = self.get_th_table(base_name, table)
 		conn = self.Create_table(base_name, table)
-		cur = conn.cursor()
+		try:
+			cur = conn.cursor()
 
-		# Récupérer la ligne existante
-		query = sql.SQL("SELECT data FROM {} LIMIT 1").format(sql.Identifier(table))
-		cur.execute(query)
-		row = cur.fetchone()
-		if row:
-			all_rows = row[0]  # {id: dict}
-		else:
-			all_rows = {}
+			# Récupérer la ligne existante
+			if isinstance(ident, list):
+				for i in ident:
+					cur.execute(
+						sql.SQL("DELETE FROM {} WHERE id = %s").format(sql.Identifier(table)),
+						[i]
+					)
+			else:
+				cur.execute(
+					sql.SQL("DELETE FROM {} WHERE id = %s").format(sql.Identifier(table)),
+					[ident]
+				)
 
-		# Supprimer les entrées
-		if isinstance(ident, list):
-			for i in ident:
-				all_rows.pop(i, None)
-		else:
-			all_rows.pop(ident, None)
-
-		# Mettre à jour la table
-		if row:
-			update_query = sql.SQL("UPDATE {table} SET data = %s::jsonb, updated_at = %s").format(
-				table=sql.Identifier(table)
-			)
-			cur.execute(update_query, [json.dumps(all_rows), datetime.datetime.now()])
 			conn.commit()
+			cur.close()
+			table_cache = self.Data_Table.setdefault(base_name, {}).setdefault(table, {})
+			if isinstance(ident, list):
+				for i in ident:
+					table_cache.pop(i, None)
+			else:
+				table_cache.pop(ident, None)
 
-		cur.close()
+			return True
+		finally:
+			self.put_conn(conn)
 
-		# Mettre à jour le cache
-		self.Data_Table.setdefault(base_name, {})[table] = all_rows
-
-		return True
-
+		# mise à jour cache
+		
 
 
