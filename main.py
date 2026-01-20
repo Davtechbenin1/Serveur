@@ -133,38 +133,11 @@ async def download_file(file_name:str):
 # Gestion du web socket
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-	"""
-	Protocol simple côté WebSocket :
-	messages JSON attendus: {"action":"subscribe","table":"xxx"}
-						{"action":"get_updates_since","table":"xxx","last_sync":"%d-%m-%Y .%H:%M:%S.%f"}
-						{"action":"insert","table":"xxx","keys":[...],"data": {...}}
-						{"action":"delete","table":"xxx","keys":[...]}
-						{"action":"ping"}
-	Réponses envoyées en JSON texte.
-	"""
 	await ws_manager.connect(websocket)
 	try:
 		while True:
 			raw = await websocket.receive_text()
-			try:
-				msg = json.loads(raw)
-			except json.JSONDecodeError:
-				await websocket.send_json({"error": "invalid_json"})
-				continue
-
-			action = msg.get("action")
-			if action == "subscribe":
-				table = msg.get("table")
-				await ws_manager.subscribe(websocket, table)
-				await websocket.send_json({"action":"subscribed", "table":table})
-
-			elif action == "unsubscribe":
-				table = msg.get("table")
-				await ws_manager.unsubscribe(websocket, table)
-				await websocket.send_json({"action":"unsubscribed", "table":table})
-
-			else:
-				await websocket.send_json({"error":"unknown_action"})
+			result = await ws_manager.handle_message(websocket,raw)
 	except WebSocketDisconnect:
 		await ws_manager.disconnect(websocket)
 
@@ -172,3 +145,4 @@ logging.basicConfig(
 	format = "%(levelname)s: %(message)s",
 	level = logging.INFO
 )
+
