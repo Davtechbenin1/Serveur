@@ -1,63 +1,248 @@
-#Coding:utf-8
+# Coding:utf-8
 import asyncio
 import json
-from fastapi import WebSocket, WebSocketDisconnect
+import os,time
+import re
+import concurrent.futures
+from pathlib import Path
+from fastapi import WebSocket
+from psycopg2.pool import SimpleConnectionPool
+from psycopg2 import sql
+import psycopg2
+# =========================
+# DATABASE (Railway)
+# =========================
+DATABASE_URL = "postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway"
+#DATABASE_URL = "postgresql://postgres:davtechbenin@localhost:8432/postgres"
 
+# =========================
+# UTILS
+# =========================
+def normalize_table_name(base_name: str, table: str) -> str:
+	base = re.sub(r"[^a-zA-Z0-9_]", "_", base_name.strip())
+	table = re.sub(r"[^a-zA-Z0-9_]", "_", table.strip())
+	return f"{base}__{table}"
+
+# =========================
+# CONNECTION MANAGER
+# =========================
 class ConnectionManager:
-    """
-    Gère connexions WebSocket et abonnements par 'table'.
-    On stocke les websockets dans un dict {id(ws): ws} et les subscriptions par id pour être sûr
-    d'éviter des problèmes d'unhashable.
-    """
-    def __init__(self):
-        self.active_connections: dict[int, WebSocket] = {}
-        self.subscriptions: dict[str, set[int]] = {}
-        self.lock = asyncio.Lock()
+	from handler import (create_table,get_data,
+		save_data,delete_data)
+	def __init__(self):
+		# WebSocket
+		self.active_connections: dict[int, WebSocket] = {}
+		self.subscriptions: dict[str, set[int]] = {}
+		self.lock = asyncio.Lock()
+		self.data_lock = asyncio.Lock()
+		self.table_locks = dict()
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        async with self.lock:
-            self.active_connections[id(websocket)] = websocket
+		self.Data_Table = dict()
 
-    async def disconnect(self, websocket: WebSocket):
-        async with self.lock:
-            ws_id = id(websocket)
-            # retire la connexion active
-            self.active_connections.pop(ws_id, None)
-            # retire des subscriptions
-            for s in list(self.subscriptions.keys()):
-                self.subscriptions[s].discard(ws_id)
-                if not self.subscriptions[s]:
-                    self.subscriptions.pop(s, None)
+		# Thread executor
+		self.executor = concurrent.futures.ThreadPoolExecutor(
+			max_workers=os.cpu_count() or 4
+		)
 
-    async def subscribe(self, websocket: WebSocket, table: str):
-        async with self.lock:
-            ws_id = id(websocket)
-            self.subscriptions.setdefault(table, set()).add(ws_id)
+		# PostgreSQL pool
+		self.pool = SimpleConnectionPool(
+			minconn=1,
+			maxconn=5,
+			dsn=DATABASE_URL,
+			sslmode="require"
+		)
+		self.created_tables = set()
 
-    async def unsubscribe(self, websocket: WebSocket, table: str):
-        async with self.lock:
-            ws_id = id(websocket)
-            if table in self.subscriptions:
-                self.subscriptions[table].discard(ws_id)
-                if not self.subscriptions[table]:
-                    self.subscriptions.pop(table, None)
+		# Local folders
+		self.info_dir = os.path.join(Path.home(), ".ProGest")
+		os.makedirs(self.info_dir, exist_ok=True)
 
-    async def broadcast_table_update(self, table: str, payload: dict):
-        """Envoie payload (dict) en JSON à tous les abonnés de 'table'."""
-        # copie des destinataires pour éviter mutation concurrente
-        async with self.lock:
-            recipient_ids = set(self.subscriptions.get(table, set()))
-            dests = [self.active_connections.get(i) for i in recipient_ids if i in self.active_connections]
-        if not dests:
-            return
-        msg = json.dumps(payload)
-        # envoi concurrent
-        await asyncio.gather(*(self._safe_send(ws, msg) for ws in dests))
+	# =========================
+	# PostgreSQL helpers
+	# =========================
+	def get_conn(self):
+		return self.pool.getconn()
 
-    async def _safe_send(self, websocket: WebSocket, message: str):
-        try:
-            await websocket.send_text(message)
-        except Exception:
-            # si erreur -> on déconnecte proprement
-            await self.disconnect(websocket)
+	def put_conn(self, conn):
+		self.pool.putconn(conn)
+
+	def close_all(self):
+		self.pool.closeall()
+
+	# =========================
+	# WebSocket lifecycle
+	# =========================
+	async def connect(self, websocket: WebSocket):
+		await websocket.accept()
+		async with self.lock:
+			self.active_connections[id(websocket)] = websocket
+
+	async def disconnect(self, websocket: WebSocket):
+		async with self.lock:
+			ws_id = id(websocket)
+			self.active_connections.pop(ws_id, None)
+			for key in list(self.subscriptions.keys()):
+				self.subscriptions[key].discard(ws_id)
+				if not self.subscriptions[key]:
+					self.subscriptions.pop(key)
+
+	# =========================
+	# Subscriptions
+	# =========================
+	async def subscribe(self, websocket: WebSocket, base_name: str):
+		async with self.lock:
+			self.subscriptions.setdefault(base_name, set()).add(id(websocket))
+
+	async def unsubscribe(self, websocket: WebSocket, base_name: str):
+		async with self.lock:
+			ws_id = id(websocket)
+			if base_name in self.subscriptions:
+				self.subscriptions[base_name].discard(ws_id)
+				if not self.subscriptions[base_name]:
+					self.subscriptions.pop(base_name)
+
+	# =========================
+	# Dispatcher
+	# =========================
+	async def handle_message(self, websocket: WebSocket, raw_message: str):
+		try:
+			msg = json.loads(raw_message)
+		except json.JSONDecodeError:
+			return await self._send_error(websocket, None, "Invalid JSON")
+		action = msg.get("action")
+		base_name = msg.get("base_name")
+		table = msg.get("table")
+		request_id = msg.get("request_id")
+		ident = msg.get("data_ident")
+		data = msg.get("data")
+		t = time.time()
+
+		if action == "subscribe":
+			await self.subscribe(websocket, base_name)
+			return await self._send_ok(websocket, request_id, action, table, ident)
+
+		if action == "unsubscribe":
+			await self.unsubscribe(websocket, base_name)
+			return await self._send_ok(websocket, request_id, action, table, ident)
+
+		if action == "save":
+			result = await self._save(base_name, table, data, ident)
+			await self.broadcast_table_update(base_name, {
+				"event": "updated",
+				"table": table,
+				"data": result
+			})
+			return await self._send_ok(websocket, request_id, action, table, ident, result)
+
+		if action == "get":
+			result = await self._get(base_name, table, ident)
+			return await self._send_ok(websocket, request_id, action, table, ident, result)
+
+		if action == "delete":
+			result = await self._delete(base_name, table, ident)
+			await self.broadcast_table_update(base_name, {
+				"event": "deleted",
+				"table": table,
+				"id": ident,
+				"data":result
+			})
+			return await self._send_ok(websocket, request_id, action, table, ident, result)
+
+		await self._send_error(websocket, request_id, "Unknown action")
+
+	# =========================
+	# Async DB wrappers
+	# =========================
+	async def _save(self, base, table, data, ident):
+		result = await asyncio.to_thread(
+			self.save_data, base, table, data, ident
+			)
+
+		real_table = normalize_table_name(base,table)
+		self.table_locks.setdefault(real_table,asyncio.Lock())
+		async with self.table_locks[real_table]:
+			all_table_info = self.Data_Table.setdefault(real_table,dict())
+			if ident:
+				all_table_info[ident] = data
+			else:
+				all_table_info.update(data)
+			self.Data_Table[real_table] = all_table_info
+
+		return result
+
+	async def _get(self, base, table, ident):
+		real_table = normalize_table_name(base,table)
+		all_table_info = self.Data_Table.setdefault(real_table,dict())
+		if ident:
+			th_data = all_table_info.get(ident)
+			if th_data:
+				return th_data
+			else:
+				result = await asyncio.to_thread(
+					self.get_data, base, table, ident
+				)
+				return result
+		elif all_table_info:
+			return all_table_info
+
+		else:
+			result = await asyncio.to_thread(
+				self.get_data, base, table, ident
+			)
+			return result
+
+	async def _delete(self, base, table, ident):
+		result = await asyncio.to_thread(
+			self.delete_data, base, table, ident
+			)
+		real_table = normalize_table_name(base,table)
+		self.table_locks.setdefault(real_table,asyncio.Lock())
+		async with self.table_locks[real_table]:
+			
+			all_table_info = self.Data_Table.setdefault(real_table,dict())
+			if ident:
+				all_table_info.pop(ident,None)
+			else:
+				all_table_info = dict()
+			self.Data_Table[real_table] = all_table_info
+		
+		return result
+
+	# =========================
+	# Broadcast
+	# =========================
+	async def broadcast_table_update(self, base_name, payload: dict):
+		async with self.lock:
+			receivers = [
+				self.active_connections[i]
+				for i in self.subscriptions.get(base_name, set())
+				if i in self.active_connections
+			]
+		await asyncio.gather(*(self._safe_send(ws, payload) for ws in receivers))
+
+	async def _safe_send(self, websocket: WebSocket, payload: dict):
+		try:
+			await websocket.send_text(json.dumps(payload))
+		except Exception:
+			await self.disconnect(websocket)
+
+	async def _send_ok(self, ws, request_id, action, table, ident, result=None):
+		if not result:
+			result = dict()
+		dic = {
+			"request_id": request_id,
+			"status": "ok",
+			"action": action,
+			'data_ident':ident,
+			"table": table,
+			"result": result
+		}
+		await self._safe_send(ws, dic)
+
+	async def _send_error(self, ws, request_id, message):
+		await self._safe_send(ws, {
+			"request_id": request_id,
+			"status": "error",
+			"message": message
+		})
+
