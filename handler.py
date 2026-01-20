@@ -1,118 +1,135 @@
-#Coding:utf-8
-def Get_data(self, base_name, table, ident=None):
-	all_table = self.Data_Table.get(base_name, {})
-	table_cache = all_table.get(table, {})
+# Coding:utf-8
+import json, re, datetime, time
+from psycopg2 import sql
 
-	if table_cache:
-		if ident:
-			return table_cache.get(ident, {})
-		else:
-			return table_cache
+def normalize_table_name(base_name: str, table: str) -> str:
+	base = re.sub(r"[^a-zA-Z0-9_]", "_", base_name.strip())
+	table = re.sub(r"[^a-zA-Z0-9_]", "_", table.strip())
+	return f"{base}__{table}"
 
-	conn = self.Create_table(base_name, table)
+# =========================
+# CREATE TABLE
+# =========================
+def create_table(self, conn, real_table):
+	if real_table in self.created_tables:
+		return 
 	cur = conn.cursor()
-
-	query = sql.SQL("SELECT data FROM {} LIMIT 1").format(sql.Identifier(table))
-	cur.execute(query)
-	row = cur.fetchone()
-
-	if row:
-		rows = row[0]  # {id: dict()}
-	else:
-		rows = {}
-
-	cur.close()
-
-	# Mettre à jour le cache
-	self.Data_Table.setdefault(base_name, {})[table] = rows
-
-	if ident:
-		return rows.get(ident, {})
-	return rows
-
-def Multiple_get(self,base_name,tables_liste):
-	all_dic = dict()
-	for table in tables_liste:
-		all_dic[table] = self.Get_data(base_name,table)
-	return all_dic
-
-def Save_data(self, base_name, table, data, data_ident):
-	"""
-	Sauvegarde ou met à jour une entrée dans la table.
-	data_ident : identifiant de l'entrée (optionnel si 'id' présent dans data)
-	"""
-	th_ident = self.get_ident(data_ident)
-	conn = self.Create_table(base_name, table)
-	cur = conn.cursor()
-
-	# Récupérer la ligne existante
-	query = sql.SQL("SELECT data FROM {} LIMIT 1").format(sql.Identifier(table))
-	cur.execute(query)
-	row = cur.fetchone()
-	if row:
-		all_rows = row[0]  # {id: dict}
-	else:
-		all_rows = {}
-
-	# Mettre à jour ou ajouter l'entrée
-	all_rows[data_ident] = data
-
-	# Mettre à jour la table
-	if row:
-		update_query = sql.SQL("UPDATE {table} SET data = %s::jsonb, updated_at = %s").format(
-			table=sql.Identifier(table)
-		)
-		cur.execute(update_query, [json.dumps(all_rows), datetime.datetime.now()])
-	else:
-		insert_query = sql.SQL("INSERT INTO {table} (data, updated_at) VALUES (%s, %s)").format(
-			table=sql.Identifier(table)
-		)
-		cur.execute(insert_query, [json.dumps(all_rows), datetime.datetime.now()])
-
+	cur.execute(
+		sql.SQL("""
+			CREATE TABLE IF NOT EXISTS {} (
+				id TEXT PRIMARY KEY,
+				data JSONB NOT NULL,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			)
+		""").format(sql.Identifier(real_table))
+	)
 	conn.commit()
 	cur.close()
+	self.created_tables.add(real_table)
+	return 
 
-	# Mettre à jour le cache
-	self.Data_Table.setdefault(base_name, {})[table] = all_rows
+# ==========================
+# GET DATA
+# ==========================
+def get_data(self, base_name, table, ident=None):
+	t = time.time()
+	conn = self.get_conn()
+	try:
+		real_table = normalize_table_name(base_name, table)
+		self.create_table(conn, real_table)
+		cur = conn.cursor()
 
-	return data
+		all_table_info = self.Data_Table.setdefault(real_table,dict())
 
-def Delete_data(self, base_name, table, ident):
+		if ident:
+			cur.execute(
+				sql.SQL("SELECT data FROM {} WHERE id = %s").format(sql.Identifier(real_table)),
+				(ident,)
+			)
+			row = cur.fetchone()
+			th_row = row[0] if row else None
+			cur.close()
+			all_table_info[ident] = th_row
+			self.Data_Table[real_table] = all_table_info
+			
+			return th_row
+		else:
+			cur.execute(
+				sql.SQL("SELECT id, data FROM {}").format(sql.Identifier(real_table))
+			)
+			rows = cur.fetchall()
+			cur.close()
+			tabs_dic = {row[0]: row[1] for row in rows}
+			all_table_info.update(tabs_dic)
+			self.Data_Table[real_table] = all_table_info
+			return tabs_dic
+	finally:
+		self.put_conn(conn)
+
+# ==========================
+# SAVE DATA
+# ==========================
+def save_data(self, base_name, table, data, ident):
 	"""
-	Supprime une ou plusieurs entrées dans la table.
-	ident : int, str ou liste
+	ident : ident unique côté client
+	data : dict
 	"""
-	conn = self.Create_table(base_name, table)
-	cur = conn.cursor()
+	t = time.time()
+	if not ident:
+		raise ValueError("ident is required")
+	conn = self.get_conn()
+	try:
+		real_table = normalize_table_name(base_name, table)
+		
+		cur = conn.cursor()
+		
+		self.create_table(conn, real_table)
 
-	# Récupérer la ligne existante
-	query = sql.SQL("SELECT data FROM {} LIMIT 1").format(sql.Identifier(table))
-	cur.execute(query)
-	row = cur.fetchone()
-	if row:
-		all_rows = row[0]  # {id: dict}
-	else:
-		all_rows = {}
-
-	# Supprimer les entrées
-	if isinstance(ident, list):
-		for i in ident:
-			all_rows.pop(i, None)
-	else:
-		all_rows.pop(ident, None)
-
-	# Mettre à jour la table
-	if row:
-		update_query = sql.SQL("UPDATE {table} SET data = %s::jsonb, updated_at = %s").format(
-			table=sql.Identifier(table)
+		cur.execute(
+			sql.SQL("""
+				INSERT INTO {} (id, data, updated_at)
+				VALUES (%s, %s, NOW())
+				ON CONFLICT (id) DO UPDATE
+				SET data = EXCLUDED.data,
+					updated_at = NOW()
+			""").format(sql.Identifier(real_table)),
+			(ident, json.dumps(data))
 		)
-		cur.execute(update_query, [json.dumps(all_rows), datetime.datetime.now()])
+
 		conn.commit()
+		cur.close()
+		return data
+	finally:
+		self.put_conn(conn)
 
-	cur.close()
+# ==========================
+# DELETE DATA
+# ==========================
+def delete_data(self, base_name, table, ident):
+	"""
+	ident : str | list[str]
+	"""
+	if not ident:
+		return False
+	conn = self.get_conn()
+	try:
+		real_table = normalize_table_name(base_name, table)
+		self.create_table(conn, real_table)
+		cur = conn.cursor()
 
-	# Mettre à jour le cache
-	self.Data_Table.setdefault(base_name, {})[table] = all_rows
-
-	return True
-
+		if isinstance(ident, list):
+			cur.execute(
+				sql.SQL("DELETE FROM {} WHERE id = ANY(%s)").format(sql.Identifier(real_table)),
+				(ident,)
+			)
+		else:
+			cur.execute(
+				sql.SQL("DELETE FROM {} WHERE id = %s").format(sql.Identifier(real_table)),
+				(ident,)
+			)
+		
+		conn.commit()
+		cur.close()
+		return True
+	finally:
+		self.put_conn(conn)
