@@ -137,12 +137,16 @@ async def websocket_endpoint(websocket: WebSocket):
 	try:
 		while True:
 			raw = await websocket.receive_text()
+			#print(raw)
 			result = await ws_manager.handle_message(websocket,raw)
 	except WebSocketDisconnect:
 		await ws_manager.disconnect(websocket)
-
+	except RuntimeError:
+		await ws_manager.disconnect(websocket)
+		
 logging.basicConfig(
 	format = "%(levelname)s: %(message)s",
 	level = logging.INFO
 )
+
 
