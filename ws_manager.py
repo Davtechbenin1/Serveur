@@ -1,14 +1,9 @@
 # Coding:utf-8
-import asyncio
-import json
-import os,time
-import re
-import concurrent.futures
-from pathlib import Path
-from fastapi import WebSocket
-from psycopg2.pool import SimpleConnectionPool
-from psycopg2 import sql
-import psycopg2
+
+from Base.serveur.main import *
+import traceback
+import sys
+from lib.serveur.DAV_BASE.MyData import date_obj
 # =========================
 # DATABASE (Railway)
 # =========================
@@ -31,6 +26,9 @@ class ConnectionManager:
 		save_data,delete_data)
 	def __init__(self):
 		# WebSocket
+
+		self.th_base_hand = data_main()
+
 		self.active_connections: dict[int, WebSocket] = {}
 		self.subscriptions: dict[str, set[int]] = {}
 		self.lock = asyncio.Lock()
@@ -49,7 +47,7 @@ class ConnectionManager:
 			minconn=1,
 			maxconn=5,
 			dsn=DATABASE_URL,
-			sslmode="require"
+			#sslmode="require"
 		)
 		self.created_tables = set()
 
@@ -111,44 +109,77 @@ class ConnectionManager:
 			return await self._send_error(websocket, None, "Invalid JSON")
 		action = msg.get("action")
 		base_name = msg.get("base_name")
-		table = msg.get("table")
 		request_id = msg.get("request_id")
-		ident = msg.get("data_ident")
 		data = msg.get("data")
 		t = time.time()
 
 		if action == "subscribe":
+			#self.th_base_hand.drop_all_tab_of(base_name)
 			await self.subscribe(websocket, base_name)
-			return await self._send_ok(websocket, request_id, action, table, ident)
+			return await self._send_ok(websocket, request_id, action)
 
 		if action == "unsubscribe":
 			await self.unsubscribe(websocket, base_name)
-			return await self._send_ok(websocket, request_id, action, table, ident)
+			return await self._send_ok(websocket, request_id, action)
 
-		if action == "save":
-			result = await self._save(base_name, table, data, ident)
-			await self.broadcast_table_update(base_name, {
-				"event": "updated",
-				"table": table,
-				"data": result
-			})
-			return await self._send_ok(websocket, request_id, action, table, ident, result)
+		if action == "sync":
+			try:
+				ident_list = list(data.keys())
+				ident_list.sort()
+				all_sync = {}
+				for id in ident_list:
+					th_msg = data[id]
+					th_msg['base_name'] = base_name
+					th_msg['request_id'] =  request_id
+					self.th_base_hand.message_handler(th_msg)
 
-		if action == "get":
-			result = await self._get(base_name, table, ident)
-			return await self._send_ok(websocket, request_id, action, table, ident, result)
+				info_gene = {
+					"request_id": request_id,
+					"status": "ok",
+					"action": action,
+					'result':data,
+				}
+				return await self.broadcast_table_update(
+					base_name,info_gene)
+			except:
+				print(traceback.format_exc())
+				return await self._send_error(websocket, request_id, 
+					"Erreur lors de la sync",data)
 
-		if action == "delete":
-			result = await self._delete(base_name, table, ident)
-			await self.broadcast_table_update(base_name, {
-				"event": "deleted",
-				"table": table,
-				"id": ident,
-				"data":result
-			})
-			return await self._send_ok(websocket, request_id, action, table, ident, result)
+		if action == "trafic":
+			try:
+				data['base_name'] = base_name
+				data['request_id'] =  request_id
+				self.th_base_hand.message_handler(data)
+				info_gene = {
+					"request_id": request_id,
+					"status": "ok",
+					"action": action,
+					'result':data,
+				}
+				return await self.broadcast_table_update(
+					base_name,info_gene)
+			except:
+				print(traceback.format_exc())
+				return await self._send_error(websocket, request_id, 
+					action,data)
 
-		await self._send_error(websocket, request_id, "Unknown action")
+
+		if action == "get_sync":
+			try:
+				date = msg.get("last_date").strip()
+				hour = msg.get('last_hour').strip()
+				data = self.th_base_hand.get_sync_message(
+					base_name,date,hour)
+
+				return await self._send_ok(websocket,
+					request_id,action,data)
+			except:
+				print(traceback.format_exc())
+				return await self._send_error(websocket, request_id, 
+					action)
+
+		return await self._send_error(websocket, request_id, "Unknown action")
 
 	# =========================
 	# Async DB wrappers
@@ -226,23 +257,51 @@ class ConnectionManager:
 		except Exception:
 			await self.disconnect(websocket)
 
-	async def _send_ok(self, ws, request_id, action, table, ident, result=None):
+	async def _send_ok(self, ws, request_id, action,result = {}):
 		if not result:
 			result = dict()
 		dic = {
 			"request_id": request_id,
 			"status": "ok",
 			"action": action,
-			'data_ident':ident,
-			"table": table,
-			"result": result
+			"date":self.get_today(),
+			"heure":self.get_hour(),
+			'result':result,
 		}
 		await self._safe_send(ws, dic)
 
-	async def _send_error(self, ws, request_id, message):
+	async def _send_error(self, ws, request_id, action, data = {}):
 		await self._safe_send(ws, {
 			"request_id": request_id,
 			"status": "error",
-			"message": message
+			"action": action,
+			"result":data
 		})
+
+# Gestion des dates
+	def get_today(self):
+		return self.normalize_date(date_obj().date__)
+
+	def get_hour(self):
+		return date_obj().hour
+
+	def get_now(self):
+		return f"{self.get_today()} .{self.get_hour()}"
+
+	def normalize_date(self,date):
+		date = date.replace("/","-")
+		d,m,y = date.split('-')
+		if len(y)==2:
+			y = '20'+y
+		elif len(y)==3:
+			y = "2"+y
+		elif len(y)==1:
+			y = "202"+y
+		if len(d)==1:
+			d = '0'+d
+		if len(m)==1:
+			m = "0"+m
+		text = f"{d}-{m}-{y}"
+		return text
+
 
