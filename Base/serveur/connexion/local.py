@@ -135,18 +135,22 @@ def save_data(self, base_name, date, data):
 # =============================
 # TABLE LIST
 # =============================
-def get_all_tabs_of(self,base_name):
-	prefix = base_name.lower()
-	conn = self.get_conn()
-	cur = conn.cursor()
-	cur.execute("""
-	    SELECT schemaname, tablename
-	    FROM pg_tables
-	    WHERE tablename ILIKE %s
-	""", (prefix + '%',))
+def get_all_tabs_of(self, base_name):
+    prefix = base_name.lower()
+    conn = self.get_conn()
+    cur = conn.cursor()
 
-	tables = cur.fetchall()
-	return tables
+    cur.execute("""
+        SELECT schemaname, tablename
+        FROM pg_tables
+        WHERE tablename ILIKE %s
+        AND schemaname NOT IN ('pg_catalog', 'information_schema')
+    """, (prefix + '%',))
+
+    tables = cur.fetchall()
+    cur.close()
+    self.put_conn(conn)
+    return tables
 
 def get_all_msg_of(self,base_name):
 	tables = self.get_all_tabs_of(base_name)
@@ -216,4 +220,5 @@ def _up_cache_local(self,where,data,id = None):
 		else:
 			tab_dic.update(data)
 		self._local_cache[where] = tab_dic
+
 
