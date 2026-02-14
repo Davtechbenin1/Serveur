@@ -6,7 +6,6 @@ from lib.serveur.DAV_BASE.MyData import date_obj
 
 import calendar
 
-
 import asyncio
 import json
 import os,time
@@ -16,8 +15,9 @@ from pathlib import Path
 from fastapi import WebSocket
 from psycopg2.pool import SimpleConnectionPool
 from psycopg2 import sql
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import psycopg2
+import traceback
 #DATABASE_URL = "postgresql://postgres:davtechbenin@localhost:8432/postgres"
 DATABASE_URL = "postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.proxy.rlwy.net:23351/railway"
 
@@ -74,29 +74,29 @@ class data_main(local):
 #
 	def message_handler(self,msg):
 		base_name = msg.get('base_name')
-		where = msg.get("where")
-		self.save_data(base_name,self.get_today(),msg)
-
-	def get_sync_message(self,base_name, date, hour):
-		#print(base_name,date)
-		all_sync_mes = dict()
-		date = date.strip()
-		if not date:
-			return self.get_all_msg_of(base_name)
+		dic = self.save_data(base_name,msg)
+		data = dic.get('data',dict())
+		if data:
+			return {data.get('id'):data.get('updated_at')}
 		else:
-			#print(date)
-			date_liste = self.get_date_list(date,self.get_today())
-			th_date_obj = datetime.strptime(f"{date}. {hour}",self.date_format_new)
-			for th_date in date_liste:
-				all_msg = self._get_data(base_name,th_date).values()
-				for th_dic in all_msg:
-					if th_date == date:
-						d = th_dic.get('date')
-						h = th_dic.get('heure')
-						c_date = datetime.strptime(f"{date}. {hour}",self.date_format_new)
-						if c_date > th_date_obj:
-							all_sync_mes[len(all_sync_mes)] = th_dic
-		return all_sync_mes
+			return False
+
+	def _get_sync_message(self,base_name, last_sync:str=None):
+		try:
+			if last_sync:
+				last_sync_dt = datetime.fromisoformat(last_sync).astimezone(timezone.utc)
+			else:
+				last_sync_dt = None
+
+			all_msgs = self._get_data(base_name,last_sync = last_sync_dt)
+
+			return all_msgs
+
+		except:
+			Error = traceback.format_exc()
+			print(Error)
+			return Error
+
 
 	def get_my_where(self,past_wh,base_name):
 		th,part = past_wh.split('_z_o_e_')
@@ -201,4 +201,3 @@ class data_main(local):
 			return days_liste
 		else:
 			return list()
-
