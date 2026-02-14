@@ -28,6 +28,8 @@ class ConnectionManager:
 		# WebSocket
 
 		self.th_base_hand = data_main()
+		#self.th_base_hand.delete_all_from_DB()
+		#sys.exit()
 
 		self.active_connections: dict[int, WebSocket] = {}
 		self.subscriptions: dict[str, set[int]] = {}
@@ -127,60 +129,63 @@ class ConnectionManager:
 				ident_list = list(data.keys())
 				ident_list.sort()
 				all_sync = {}
+				all_up = {}
 				for id in ident_list:
 					th_msg = data[id]
 					th_msg['base_name'] = base_name
 					th_msg['request_id'] =  request_id
-					await asyncio.to_thread(self.th_base_hand.message_handler,th_msg)
+					dic = await asyncio.to_thread(self.th_base_hand.message_handler,th_msg)
+					all_up.update(dic)
 
 				info_gene = {
 					"request_id": request_id,
 					"status": "ok",
 					"action": action,
 					'result':data,
+					"sync_info":all_up
 				}
 				return await self.broadcast_table_update(
 					base_name,info_gene)
 			except:
 				error_format = traceback.format_exc()
-				print(error_format)
 				return await self._send_error(websocket, request_id, 
-					"Erreur lors de la sync",data,error_format = error_format)
+					"Erreur lors de la sync",data,error_format)
 
 		if action == "trafic":
 			try:
 				data['base_name'] = base_name
 				data['request_id'] =  request_id
-				await asyncio.to_thread(self.th_base_hand.message_handler,data)
+				dic = await asyncio.to_thread(self.th_base_hand.message_handler,data)
 				info_gene = {
 					"request_id": request_id,
 					"status": "ok",
 					"action": action,
 					'result':data,
+					"sync_info":dic,
 				}
 				return await self.broadcast_table_update(
 					base_name,info_gene)
 			except:
 				error_format = traceback.format_exc()
-				print(error_format)
 				return await self._send_error(websocket, request_id, 
-					action,data,error_format = error_format)
-
+					action,data,error_format)
 
 		if action == "get_sync":
-			print(msg)
 			try:
-				date = msg.get("last_date").strip()
-				hour = msg.get('last_hour').strip()
-				data = await asyncio.to_thread(self.th_base_hand.get_sync_message,
-					base_name,date,hour)
-				print(data)
+				date = (msg.get("last_sync") or "").strip()
+				data = await asyncio.to_thread(
+					self.th_base_hand._get_sync_message,
+					base_name,date)
 
-				return await self._send_ok(websocket,
-					request_id,action,data)
+				if isinstance(data,dict):
+					return await self._send_ok(websocket,
+						request_id,action,data)
+				else:
+					return await self._send_error(websocket, 
+						request_id,action,data)
+
 			except:
 				error_format = traceback.format_exc()
-				print(error_format)
 				return await self._send_error(websocket, request_id, 
 					action,error_format = error_format)
 
@@ -275,13 +280,13 @@ class ConnectionManager:
 		}
 		await self._safe_send(ws, dic)
 
-	async def _send_error(self, ws, request_id, action, data = {}, error_format = str()):
+	async def _send_error(self, ws, request_id, action, data = {},error_format = None):
 		await self._safe_send(ws, {
 			"request_id": request_id,
 			"status": "error",
-			"error_format":error_format,
 			"action": action,
-			"result":data
+			"result":data,
+			"error_format":error_format
 		})
 
 # Gestion des dates
@@ -309,7 +314,5 @@ class ConnectionManager:
 			m = "0"+m
 		text = f"{d}-{m}-{y}"
 		return text
-
-
 
 
