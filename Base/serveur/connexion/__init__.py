@@ -17,7 +17,6 @@ def normalize_table_name(base_name: str) -> str:
 	return base
 
 class local:
-
 	def delete_all_from_DB(self):
 		conn = self.get_conn()
 		try:
@@ -37,6 +36,7 @@ class local:
 			"action":action,
 			"where":where
 		}
+	
 	def failed_response(self,data,where,action,E = None):
 		if not E:
 			E = traceback.format_exc()
@@ -48,8 +48,6 @@ class local:
 			"action":action,
 			"where":where
 		}
-
-
 
 	# =========================
 	# CREATE TABLE
@@ -142,6 +140,31 @@ class local:
 			return dict()
 		finally:
 			self.put_conn(conn)
+
+	def _get_data_(self, base_name, last_sync, limit=500):
+		real_table = normalize_table_name(base_name)
+		conn = self.get_conn()
+		cur = conn.cursor()
+
+		query = """
+			SELECT id, data, updated_at
+			FROM {table}
+			WHERE updated_at > %s
+			ORDER BY updated_at ASC
+			LIMIT %s
+		"""
+
+		cur.execute(
+			sql.SQL(query).format(table=sql.Identifier(real_table)),
+			(last_sync, limit)
+		)
+
+		rows = cur.fetchall()
+		cur.close()
+		self.put_conn(conn)
+
+		return rows
+
 
 	def get_data(self, base_name, last_sync:datetime = None):
 		#try:
