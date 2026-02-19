@@ -13,7 +13,6 @@ DATABASE_URL = "postgresql://postgres:OjAXnBDSJNNzqnrCMgJbLvmQHFkhUwac@caboose.p
 # =========================
 # UTILS
 # =========================
-
 def normalize_table_name(base_name: str, table: str) -> str:
 	base = re.sub(r"[^a-zA-Z0-9_]", "_", base_name.strip())
 	table = re.sub(r"[^a-zA-Z0-9_]", "_", table.strip())
