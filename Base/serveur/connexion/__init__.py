@@ -104,7 +104,7 @@ class local:
 	# ==========================
 	# GET DATA
 	# ==========================
-	def _get_data(self, base_name, last_sync: datetime = None):
+	def _get_data(self, base_name, last_sync: str = None):
 		t = time.time()
 		conn = self.get_conn()
 		try:
@@ -112,13 +112,22 @@ class local:
 			self.create_table(conn, real_table)
 			cur = conn.cursor()
 			
-			query = "SELECT id, data, updated_at FROM {table}"
-			param = ()
 			if last_sync:
-				#print(last_sync)
-				query += " WHERE updated_at > %s"
-				param = last_sync,
-			query += " ORDER BY updated_at ASC"
+				last_ts, last_id = last_sync.split('_id_')
+				last_ts = datetime.fromisoformat(last_ts).astimezone(timezone.utc)
+				last_id = int(last_id)
+			else:
+				last_ts = datetime(2026,1,1, tzinfo=timezone.utc)
+				last_id = 0
+
+			param = (last_ts, last_id)
+
+			query = """
+				SELECT id, data, updated_at 
+				FROM {table}
+				WHERE (updated_at, id)> (%s, %s)
+				ORDER BY updated_at ASC, id ASC
+			"""
 			cur.execute(sql.SQL(query).format(
 				table = sql.Identifier(real_table)
 				), param)
@@ -130,7 +139,9 @@ class local:
 				id = row[0]
 				data = copy.deepcopy(row[1])
 				update_at = row[2]
-				data['updated_at'] = update_at.astimezone(timezone.utc).isoformat()
+				up = update_at.astimezone(timezone.utc).isoformat()
+				data['updated_at'] = up
+				data['cursor'] = f"{up}_id_{id}"
 				tabs_dic[id] = data
 
 			return tabs_dic
@@ -204,6 +215,7 @@ class local:
 			server_updated_at = row[1].astimezone(timezone.utc).isoformat()
 			data['updated_at'] = server_updated_at
 			data['id'] = server_id
+			data["cursor"] = f"{server_updated_at}_id_{server_id}"
 			#print("ok")
 			return self.success_response(data,real_table,'save')
 		except:
