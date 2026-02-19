@@ -140,12 +140,8 @@ class data_main(local):
 	"""
 	def _get_sync_message(self,base_name, last_sync:str=None):
 		try:
-			if last_sync:
-				last_sync_dt = datetime.fromisoformat(last_sync).astimezone(timezone.utc)
-			else:
-				last_sync_dt = None
-
-			all_msgs = self._get_data(base_name,last_sync = last_sync_dt)
+			
+			all_msgs = self._get_data(base_name,last_sync = last_sync)
 
 			return all_msgs
 
