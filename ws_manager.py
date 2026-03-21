@@ -142,7 +142,9 @@ class ConnectionManager:
 					"status": "ok",
 					"action": action,
 					'result':data,
-					"sync_info":all_up
+					"sync_info":all_up,
+					"date_fic":msg.get('date_fic'),
+					"date":msg.get('date')
 				}
 				return await self.broadcast_table_update(
 					base_name,info_gene)
@@ -173,9 +175,11 @@ class ConnectionManager:
 		if action == "get_sync":
 			try:
 				date = (msg.get("last_sync") or "").strip()
+				print(date)
 				data = await asyncio.to_thread(
 					self.th_base_hand._get_sync_message,
 					base_name,date)
+				#print(data)
 
 				if isinstance(data,dict):
 					return await self._send_ok(websocket,
