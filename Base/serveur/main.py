@@ -64,7 +64,11 @@ class data_main(local):
 	# PostgreSQL helpers
 	# =========================
 	def get_conn(self):
-		return self.pool.getconn()
+		conn = self.pool.getconn()
+		cur = conn.cursor()
+		cur.execute("SET timezone = 'UTC';")
+		cur.close()
+		return conn
 
 	def put_conn(self, conn):
 		self.pool.putconn(conn)
@@ -81,66 +85,9 @@ class data_main(local):
 		else:
 			return False
 
-	"""
-	def _get_sync_message(self, base_name, last_sync: str = None, limit: int = 500):
-		try:
-			# --- Parse ISO date ---
-			if last_sync:
-				last_sync_dt = datetime.fromisoformat(last_sync)
-				if last_sync_dt.tzinfo is None:
-					last_sync_dt = last_sync_dt.replace(tzinfo=timezone.utc)
-				else:
-					last_sync_dt = last_sync_dt.astimezone(timezone.utc)
-			else:
-				# Si aucune sync → date très ancienne
-				last_sync_dt = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-			# --- Récupération batch ---
-			rows = self._get_data_(
-				base_name,
-				last_sync=last_sync_dt,
-				limit=limit   # ⬅️ nouveau
-			)
-
-			# rows = [(id, data, updated_at), ...]
-
-			if not rows:
-				return {
-					"data": [],
-					"has_more": False,
-					"cursor": last_sync_dt.isoformat()
-				}
-
-			# --- Nouveau curseur ---
-			last_updated = rows[-1][2].astimezone(timezone.utc)
-
-			payload = []
-			for r in rows:
-				payload.append({
-					"id": r[0],
-					"data": r[1],
-					"updated_at": r[2].astimezone(timezone.utc).isoformat()
-				})
-
-			return {
-				"data": payload,
-				"has_more": True,
-				"cursor": last_updated.isoformat()
-			}
-
-		except Exception:
-			Error = traceback.format_exc()
-			print(Error)
-			return {
-				"error": True,
-				"trace": Error
-			}
-
-
-	"""
 	def _get_sync_message(self,base_name, last_sync:str=None):
 		try:
-			
+			print(base_name,last_sync)
 			all_msgs = self._get_data(base_name,last_sync = last_sync)
 
 			return all_msgs
