@@ -118,10 +118,12 @@ class ConnectionManager:
 		if action == "subscribe":
 			#self.th_base_hand.drop_all_tab_of(base_name)
 			await self.subscribe(websocket, base_name)
+			await self.subscribe(websocket, "gsmart")
 			return await self._send_ok(websocket, request_id, action)
 
 		if action == "unsubscribe":
 			await self.unsubscribe(websocket, base_name)
+			await self.unsubscribe(websocket, "gsmart")
 			return await self._send_ok(websocket, request_id, action)
 
 		if action == "sync":
